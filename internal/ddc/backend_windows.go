@@ -2,24 +2,24 @@
 
 // Package ddc 的 Windows 后端：经 user32.dll 枚举 GDI 监视器，
 // 经 dxva2.dll 的 High-Level Monitor Configuration API 完成 DDC/CI
-// 读写（VCP Get/Set、Capabilities）。所有系统调用通过 purego
-// 绑定，不写 cgo 胶水。
+// 读写（VCP Get/Set、Capabilities）。
 //
-// 注意（骨架阶段）：本文件尚未在装有 Go 工具链的环境编译过，
-// 首次 `wails dev` 前需 `go mod tidy`，并在 P27h-20 上核对
-// dxva2 返回的错误码分类（见 tasks.md 3.3）。
+// 系统调用统一走 syscall.LazyProc.Call（内部为 SyscallN）：
+// 纯 Go、无 cgo，且 Call 返回的第三个值是调用后在同一 OS 线程
+// 原子取回的 LastError——purego + 事后 GetLastError 会因 goroutine
+// 被调度到别的线程而拿不到真实错误码。
 package ddc
 
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
 
-	"github.com/ebitengine/purego"
 	"golang.org/x/sys/windows/registry"
 
 	"turtle/internal/edid"
@@ -32,7 +32,7 @@ type winRECT struct {
 	left, top, right, bottom int32
 }
 
-// MONITORINFOEXW，cbSize = unsafe.Sizeof = 104。
+// MONITORINFOEXW，cbSize = 104。
 type monitorInfoExW struct {
 	cbSize    uint32
 	rcMonitor winRECT
@@ -41,7 +41,7 @@ type monitorInfoExW struct {
 	szDevice  [32]uint16
 }
 
-// DISPLAY_DEVICEW
+// DISPLAY_DEVICEW（cb = 840）。
 type displayDeviceW struct {
 	cb           uint32
 	deviceName   [32]uint16
@@ -51,78 +51,45 @@ type displayDeviceW struct {
 	deviceKey    [128]uint16
 }
 
-// PHYSICAL_MONITOR（dxva2）
+// PHYSICAL_MONITOR（dxva2）。
+// szPhysicalMonitorDescription 长度为 PHYSICAL_MONITOR_DESCRIPTION_SIZE(126)
+// 个 WCHAR；单显示器时尾部富余不影响，hPhysicalMonitor 始终在偏移 0。
 type physicalMonitorNative struct {
 	hPhysicalMonitor uintptr
-	// szPhysicalMonitorDescription[128]
-	description [128]uint16
+	description      [126]uint16
 }
+
+// ---- user32 / dxva2 过程 ----
+
+var (
+	user32 = syscall.NewLazyDLL("user32.dll")
+	dxva2  = syscall.NewLazyDLL("dxva2.dll")
+
+	pEnumDisplayMonitors = user32.NewProc("EnumDisplayMonitors")
+	pGetMonitorInfoW     = user32.NewProc("GetMonitorInfoW")
+	pEnumDisplayDevicesW = user32.NewProc("EnumDisplayDevicesW")
+
+	pGetNumberOfPhysicalMonitors = dxva2.NewProc("GetNumberOfPhysicalMonitorsFromHMONITOR")
+	pGetPhysicalMonitors         = dxva2.NewProc("GetPhysicalMonitorsFromHMONITOR")
+	pDestroyPhysicalMonitors     = dxva2.NewProc("DestroyPhysicalMonitors")
+	pGetVCPFeatureReply          = dxva2.NewProc("GetVCPFeatureAndVCPFeatureReply")
+	pSetVCPFeature               = dxva2.NewProc("SetVCPFeature")
+	pGetCapabilitiesStringLength = dxva2.NewProc("GetCapabilitiesStringLength")
+	pCapabilitiesRequestReply    = dxva2.NewProc("CapabilitiesRequestAndCapabilitiesReply")
+)
 
 // 枚举回调的结果缓冲与全局回调（syscall.NewCallback 有数量上限，
 // 必须复用，不能每次 Enumerate 都新建）。
 var (
 	enumResult          []uintptr
-	enumMonitorCallback uintptr
-)
-
-// ---- user32 / dxva2 函数指针 ----
-
-var (
-	enumDisplayMonitors func(hdc uintptr, lprc *winRECT, cb uintptr, lparam uintptr) int32
-	getMonitorInfoW     func(hmon uintptr, info *monitorInfoExW) int32
-	enumDisplayDevicesW func(uncName *uint16, devNum uint32, dd *displayDeviceW, flags uint32) int32
-
-	getNumberOfPhysicalMonitors func(hmon uintptr, count *uint32) int32
-	getPhysicalMonitors         func(hmon uintptr, size uint32, arr *physicalMonitorNative) int32
-	destroyPhysicalMonitors     func(size uint32, arr *physicalMonitorNative) int32
-	getVCPFeatureReply          func(hPhys uintptr, code uint8, vcpType *uint8, cur, max *uint32) int32
-	setVCPFeature               func(hPhys uintptr, code uint8, value uint32) int32
-	getCapabilitiesStringLength func(hPhys uintptr, length *uint32) int32
-	capabilitiesRequestReply    func(hPhys uintptr, s *byte, lengthChars uint32) int32
-)
-
-// loadedDLLs 保持已加载模块常驻（进程生命周期内不 FreeLibrary）。
-var loadedDLLs []*syscall.DLL
-
-func mustLoadDLL(name string) uintptr {
-	dll, err := syscall.LoadDLL(name)
-	if err != nil {
-		panic(err)
-	}
-	loadedDLLs = append(loadedDLLs, dll)
-	return uintptr(dll.Handle) // Handle 是字段（syscall.Handle），不是方法
-}
-
-func init() {
-	// 用 LoadDLL 而非 LazyDLL.Handle()：后者在 Go 1.23+ 改为
-	// (uintptr, error) 双返回值；*syscall.DLL 的 Handle() 签名稳定。
-	user32 := mustLoadDLL("user32.dll")
-	dxva2 := mustLoadDLL("dxva2.dll")
-
-	reg := func(h uintptr, p any, name string) {
-		purego.RegisterLibFunc(p, h, name)
-	}
-	reg(user32, &enumDisplayMonitors, "EnumDisplayMonitors")
-	reg(user32, &getMonitorInfoW, "GetMonitorInfoW")
-	reg(user32, &enumDisplayDevicesW, "EnumDisplayDevicesW")
-
-	reg(dxva2, &getNumberOfPhysicalMonitors, "GetNumberOfPhysicalMonitorsFromHMONITOR")
-	reg(dxva2, &getPhysicalMonitors, "GetPhysicalMonitorsFromHMONITOR")
-	reg(dxva2, &destroyPhysicalMonitors, "DestroyPhysicalMonitors")
-	reg(dxva2, &getVCPFeatureReply, "GetVCPFeatureAndVCPFeatureReply")
-	reg(dxva2, &setVCPFeature, "SetVCPFeature")
-	reg(dxva2, &getCapabilitiesStringLength, "GetCapabilitiesStringLength")
-	reg(dxva2, &capabilitiesRequestReply, "CapabilitiesRequestAndCapabilitiesReply")
-
 	enumMonitorCallback = syscall.NewCallback(
 		func(hmon, _ uintptr, _ *winRECT, _ uintptr) uintptr {
 			enumResult = append(enumResult, hmon)
 			return 1 // TRUE
 		},
 	)
-}
+)
 
-// Backend 构造器（由 app 层通过 ddc.NewBackend 调用）。
 func NewBackend() (monitor.Backend, error) {
 	return &windowsBackend{monitors: map[string]*winMonitor{}}, nil
 }
@@ -151,22 +118,23 @@ func (b *windowsBackend) Enumerate(ctx context.Context) ([]monitor.Monitor, erro
 	b.closeLocked()
 
 	enumResult = enumResult[:0]
-	if r := enumDisplayMonitors(0, nil, enumMonitorCallback, 0); r == 0 {
-		return nil, &monitor.Error{Kind: monitor.KindUnknown, Op: "EnumDisplayMonitors", Err: syscall.GetLastError()}
+	r1, _, errno := pEnumDisplayMonitors.Call(0, 0, enumMonitorCallback, 0)
+	if r1 == 0 {
+		return nil, mapErrno(errno, "EnumDisplayMonitors")
 	}
 
 	out := make([]monitor.Monitor, 0, len(enumResult))
-	for _, hmon := range enumResult {
+	for _, hmon := range hmonSnapshot() {
 		mi := monitorInfoExW{cbSize: uint32(unsafe.Sizeof(monitorInfoExW{}))}
-		if getMonitorInfoW(hmon, &mi) == 0 {
+		r1, _, _ := pGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi)))
+		if r1 == 0 {
 			continue
 		}
 		deviceName := syscall.UTF16ToString(mi.szDevice[:])
 
 		m, err := b.openPhysical(hmon, deviceName)
 		if err != nil {
-			// 某台显示器打不开（大概率关闭了 DDC/CI）不应拖垮整个列表，
-			// 但也无法操作它——跳过并由 GetDiagnostics 解释。
+			// 某台显示器打不开（虚拟显示器 / DDC 不可用）不应拖垮整个列表。
 			continue
 		}
 		out = append(out, m)
@@ -174,18 +142,28 @@ func (b *windowsBackend) Enumerate(ctx context.Context) ([]monitor.Monitor, erro
 	return out, nil
 }
 
+// hmonSnapshot 返回 enumResult 的副本，避免回调切片在后续迭代中
+// 被意外复用修改。
+func hmonSnapshot() []uintptr {
+	s := make([]uintptr, len(enumResult))
+	copy(s, enumResult)
+	return s
+}
+
 func (b *windowsBackend) openPhysical(hmon uintptr, deviceName string) (monitor.Monitor, error) {
 	var count uint32
-	if getNumberOfPhysicalMonitors(hmon, &count) == 0 || count == 0 {
-		return monitor.Monitor{}, &monitor.Error{
-			Kind: monitor.KindLinkUnsupported, Op: "GetNumberOfPhysicalMonitors", Err: syscall.GetLastError(),
-		}
+	r1, _, errno := pGetNumberOfPhysicalMonitors.Call(hmon, uintptr(unsafe.Pointer(&count)))
+	if r1 == 0 || count == 0 {
+		return monitor.Monitor{}, mapErrno(errno, "GetNumberOfPhysicalMonitors")
 	}
 	arr := make([]physicalMonitorNative, count)
-	if getPhysicalMonitors(hmon, count, &arr[0]) == 0 {
-		return monitor.Monitor{}, &monitor.Error{
-			Kind: monitor.KindLinkUnsupported, Op: "GetPhysicalMonitors", Err: syscall.GetLastError(),
-		}
+	r1, _, errno = pGetPhysicalMonitors.Call(
+		hmon,
+		uintptr(count),
+		uintptr(unsafe.Pointer(&arr[0])),
+	)
+	if r1 == 0 {
+		return monitor.Monitor{}, mapErrno(errno, "GetPhysicalMonitors")
 	}
 
 	b.seq++
@@ -237,10 +215,18 @@ func (b *windowsBackend) GetVCP(ctx context.Context, id string, code uint8) (mon
 
 	var v monitor.VCPValue
 	err = monitor.Retry(ctx, func() error {
-		var vct uint8
-		var cur, max uint32
-		if getVCPFeatureReply(m.handle, code, &vct, &cur, &max) == 0 {
-			return mapLastError("GetVCP("+monitor.FeatureName(code)+")")
+		// 注意：pvct 是 MC_VCP_CODE_TYPE（C enum = 4 字节 DWORD），
+		// 绝不能传 *uint8，否则 API 写 4 字节会破坏相邻内存。
+		var vct, cur, max uint32
+		r1, _, errno := pGetVCPFeatureReply.Call(
+			m.handle,
+			uintptr(code),
+			uintptr(unsafe.Pointer(&vct)),
+			uintptr(unsafe.Pointer(&cur)),
+			uintptr(unsafe.Pointer(&max)),
+		)
+		if r1 == 0 {
+			return mapErrno(errno, "GetVCP("+monitor.FeatureName(code)+")")
 		}
 		v = monitor.VCPValue{Type: monitor.VCPType(vct), Current: uint16(cur), Max: uint16(max)}
 		return nil
@@ -263,8 +249,9 @@ func (b *windowsBackend) SetVCP(ctx context.Context, id string, code uint8, valu
 	// 仅 Timeout（总线无应答，无法确认写入是否到达）才重试；
 	// 其他错误立即返回，避免重复写入。
 	return monitor.Retry(ctx, func() error {
-		if setVCPFeature(m.handle, code, uint32(value)) == 0 {
-			return mapLastError("SetVCP(" + monitor.FeatureName(code) + ")")
+		r1, _, errno := pSetVCPFeature.Call(m.handle, uintptr(code), uintptr(value))
+		if r1 == 0 {
+			return mapErrno(errno, "SetVCP("+monitor.FeatureName(code)+")")
 		}
 		return nil
 	})
@@ -283,17 +270,29 @@ func (b *windowsBackend) Capabilities(ctx context.Context, id string) (string, e
 	}
 
 	var n uint32
-	if getCapabilitiesStringLength(m.handle, &n) == 0 || n == 0 {
-		return "", mapLastError("GetCapabilitiesStringLength")
+	r1, _, errno := pGetCapabilitiesStringLength.Call(
+		m.handle, uintptr(unsafe.Pointer(&n)),
+	)
+	if r1 == 0 {
+		return "", mapErrno(errno, "GetCapabilitiesStringLength")
 	}
-	buf := make([]byte, n+1) // +1 保证 NUL 空间
-	if capabilitiesRequestReply(m.handle, &buf[0], uint32(len(buf))) == 0 {
-		return "", mapLastError("CapabilitiesRequestAndCapabilitiesReply")
+	if n == 0 {
+		return "", &monitor.Error{Kind: monitor.KindUnsupportedCode, Op: "Capabilities length"}
+	}
+	// 该 API 写入的是 ANSI（ASCII）字符串，按字节接收。
+	buf := make([]byte, n)
+	r1, _, errno = pCapabilitiesRequestReply.Call(
+		m.handle,
+		uintptr(unsafe.Pointer(&buf[0])),
+		uintptr(n),
+	)
+	if r1 == 0 {
+		return "", mapErrno(errno, "CapabilitiesRequestAndCapabilitiesReply")
 	}
 	if i := bytes.IndexByte(buf, 0); i >= 0 {
 		buf = buf[:i]
 	}
-	return string(buf), nil
+	return strings.TrimSpace(string(buf)), nil
 }
 
 func (b *windowsBackend) Close() error {
@@ -305,31 +304,44 @@ func (b *windowsBackend) Close() error {
 
 func (b *windowsBackend) closeLocked() {
 	for _, m := range b.monitors {
-		destroyPhysicalMonitors(uint32(len(m.native)), &m.native[0])
+		pDestroyPhysicalMonitors.Call(
+			uintptr(len(m.native)),
+			uintptr(unsafe.Pointer(&m.native[0])),
+		)
 	}
 	b.monitors = map[string]*winMonitor{}
 }
 
-// mapLastError 将 dxva2/user32 的失败错误码映射为 monitor.Error。
-// 分类需要在真实硬件上复核（tasks.md 3.3）。
-func mapLastError(op string) error {
-	lastErr := syscall.GetLastError()
-	errno, ok := lastErr.(syscall.Errno)
-	if !ok {
-		return &monitor.Error{Kind: monitor.KindUnknown, Op: op, Err: lastErr}
+// mapErrno 把 dxva2 调用失败的 Windows 错误码映射为 monitor.Error，
+// 原始十六进制错误码始终带进 Detail，便于真机排错。
+func mapErrno(callErr error, op string) error {
+	var errno syscall.Errno
+	if !errors.As(callErr, &errno) {
+		// 返回 FALSE 但拿不到错误码：按瞬时 DDC 故障处理（可重试）。
+		return &monitor.Error{
+			Kind: monitor.KindTimeout,
+			Op:   op,
+			Err:  fmt.Errorf("windows call failed without error code: %v", callErr),
+		}
 	}
 	kind := monitor.KindUnknown
 	switch uint32(errno) {
+	case 0: // ERROR_SUCCESS：FALSE + 成功码，按瞬时故障处理
+		kind = monitor.KindTimeout
 	case 50: // ERROR_NOT_SUPPORTED
 		kind = monitor.KindUnsupportedCode
-	case 1460: // ERROR_TIMEOUT（DDC 总线无应答：线缆不支持 / DDC 关闭）
+	case 1460, 31: // ERROR_TIMEOUT / ERROR_GEN_FAILURE（DDC 无应答）
 		kind = monitor.KindTimeout
-	case 87: // ERROR_INVALID_PARAMETER（句柄通常已失效）
+	case 87: // ERROR_INVALID_PARAMETER（多为句柄失效）
 		kind = monitor.KindDeviceGone
-	case 31: // ERROR_GEN_FAILURE（部分机型在 DDC 关闭时返回）
-		kind = monitor.KindTimeout
+	case 1167, 4390: // ERROR_DEVICE_NOT_CONNECTED / 设备不存在
+		kind = monitor.KindDeviceGone
 	}
-	return &monitor.Error{Kind: kind, Op: op, Err: errno}
+	return &monitor.Error{
+		Kind: kind,
+		Op:   op,
+		Err:  fmt.Errorf("windows error %d (0x%08X)", uint32(errno), uint32(errno)),
+	}
 }
 
 // readEDIDIdentity 经 GDI 设备名（\\.\DISPLAYn）找到监视器 PnP ID，
@@ -341,7 +353,13 @@ func readEDIDIdentity(deviceName string) (vendor, model, serial string) {
 	}
 	var dd displayDeviceW
 	dd.cb = uint32(unsafe.Sizeof(dd))
-	if enumDisplayDevicesW(devPtr, 0, &dd, 0) == 0 {
+	r1, _, _ := pEnumDisplayDevicesW.Call(
+		uintptr(unsafe.Pointer(devPtr)),
+		0,
+		uintptr(unsafe.Pointer(&dd)),
+		0,
+	)
+	if r1 == 0 {
 		return
 	}
 	deviceID := syscall.UTF16ToString(dd.deviceID[:]) // MONITOR\LEN40AA\<instance>

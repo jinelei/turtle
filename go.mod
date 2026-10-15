@@ -7,7 +7,6 @@ go 1.22.0
 toolchain go1.24.3
 
 require (
-	github.com/ebitengine/purego v0.8.4
 	github.com/wailsapp/wails/v2 v2.10.2
 	golang.org/x/sys v0.30.0
 )
