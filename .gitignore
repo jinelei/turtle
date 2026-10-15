@@ -1,0 +1,30 @@
+# Wails / Go
+/build/bin/
+/turtle
+/turtle.exe
+*.dll
+*.exe
+*.test
+*.out
+
+# Go workspace（如后续使用）
+go.work
+go.work.sum
+
+# 前端
+node_modules/
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# Wails 生成的绑定（wails dev/generate module 自动生成）
+# 骨架阶段手工维护了一份垫片，提交入库便于无 Wails 时 typecheck
+# frontend/wailsjs/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# OpenSpec 本地工作视图
+.openspec/
