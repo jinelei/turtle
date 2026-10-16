@@ -79,9 +79,9 @@ func Parse(b []byte) (*Info, error) {
 // vendorID 将两个大端 5-bit 字段还原为三字母 PnP ID。
 func vendorID(hi, lo byte) string {
 	v := uint16(hi)<<8 | uint16(lo)
-	c1 := byte('A' + ((v>>10)&0x1F) - 1)
-	c2 := byte('A' + ((v>>5)&0x1F) - 1)
-	c3 := byte('A' + (v&0x1F) - 1)
+	c1 := byte('A' + ((v >> 10) & 0x1F) - 1)
+	c2 := byte('A' + ((v >> 5) & 0x1F) - 1)
+	c3 := byte('A' + (v & 0x1F) - 1)
 	return string([]byte{c1, c2, c3})
 }
 

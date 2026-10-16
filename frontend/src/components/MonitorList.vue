@@ -22,18 +22,20 @@ const emit = defineEmits<{
       </button>
     </div>
 
-    <div v-if="monitors.length === 0 && !loading" class="empty">
-      未检测到支持 DDC/CI 的显示器
-    </div>
+    <div class="monitor-items">
+      <div v-if="monitors.length === 0 && !loading" class="empty">
+        未检测到支持 DDC/CI 的显示器
+      </div>
 
-    <button
-      v-for="m in monitors"
-      :key="m.id"
-      :class="['monitor-item', { active: m.id === selectedId }]"
-      @click="emit('select', m.id)"
-    >
-      {{ m.name }}
-      <span class="sub">{{ m.vendor }} · {{ m.model }}</span>
-    </button>
+      <button
+        v-for="m in monitors"
+        :key="m.id"
+        :class="['monitor-item', { active: m.id === selectedId }]"
+        @click="emit('select', m.id)"
+      >
+        {{ m.name }}
+        <span class="sub">{{ m.vendor }} · {{ m.model }}</span>
+      </button>
+    </div>
   </div>
 </template>

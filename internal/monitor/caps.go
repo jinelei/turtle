@@ -7,13 +7,13 @@ import (
 
 // Capabilities 是 VCP 0xF3 capabilities 字符串解析结果。
 type Capabilities struct {
-	Protocol string   // prot(...)
-	Type     string   // type(...)
-	Model    string   // model(...)
-	VCP      []uint8  // vcp(...) 中声明支持的特征码
+	Protocol string            // prot(...)
+	Type     string            // type(...)
+	Model    string            // model(...)
+	VCP      []uint8           // vcp(...) 中声明支持的特征码
 	Allowed  map[uint8][]uint8 // 表类型特征的可选值，如 0x60: [0x0F,0x11,0x31]
-	Raw      string   // 原始字符串
-	Partial  bool     // 解析不完整（括号不配对/被截断）
+	Raw      string            // 原始字符串
+	Partial  bool              // 解析不完整（括号不配对/被截断）
 }
 
 // Supported 报告某 VCP 码是否在能力清单中声明；

@@ -3,7 +3,7 @@
 ## 1. 工程骨架与工具链
 
 - [x] 1.1 初始化 Go module（`go.mod`，module 名 `turtle`，Go 1.21+），验证 `go mod tidy` 无报错
-- [x] 1.2 添加 Wails v2 与 purego 依赖（`github.com/wailsapp/wails/v2`、`github.com/ebitengine/purego`），验证 `go build ./...` 通过
+- [x] 1.2 添加 Wails v2 与 `golang.org/x/sys` 依赖（系统 DLL 经 `syscall.LazyProc.Call` 直接调用，纯 Go 无 cgo），验证 `go build ./...` 通过
 - [ ] 1.3 创建 `wails.json`、`main.go`（Wails 启动、窗口尺寸、标题）、`app.go`（Bound struct），验证 `wails dev` 能打开空白桌面窗口（Windows 前置：安装 mingw-w64 gcc）
 - [ ] 1.4 用 `wails generate module` 生成前端绑定并搭建 `frontend/`（Vue 3 + TS + Vite），验证 `npm run build` 与 `wails dev` 联调通过
 - [x] 1.5 编写 README：Windows/macOS 工具链安装（Go、Wails CLI、gcc/Xcode CLT）、开发与构建命令、DDC/CI 开启说明；验证 README 中命令可照做执行
@@ -13,20 +13,21 @@
 
 - [x] 2.1 定义 `Monitor`、`VCPValue`、`VCPType`、`ErrorCode` 类型与 `Backend` 接口（Enumerate/GetVCP/SetVCP/Capabilities/Close），验证 `go vet ./...` 通过
 - [x] 2.2 实现 VCP 码常量表与标准输入源值→名称映射（0x01–0x12，含 USB-C），未知值回退 `未知输入源 (0xNN)`；验证表驱动单测覆盖标准值与未知值
-- [ ] 2.3 实现错误分类 `monitor.Error{Kind,Cause}`（DDCDisabled/LinkUnsupported/Timeout/UnsupportedCode/DeviceGone/PlatformUnsupported）与中文用户消息映射；验证每类 Kind 的单测断言
+- [ ] 2.3 实现错误分类 `monitor.Error{Kind,Cause}`（DDCDisabled/LinkUnsupported/Timeout/UnsupportedCode/DeviceGone/PlatformUnsupported/RemoteSession）与中文用户消息映射；验证每类 Kind 的单测断言
 - [x] 2.4 实现 VCP 操作重试包装（3 次、300ms 间隔；Set 仅在未确认写入时重试），用假 Backend 验证：瞬时失败第二次成功、持续失败报错、写入确认后不重发
 - [x] 2.5 实现 capabilities 字符串 tokenizer/解析器（prot/type/model/cmds/vcp，容忍截断），验证公开样例与残缺括号样例的单测（部分结果 + 错误）
 - [ ] 2.6 实现 EDID 解析器（vendor ID、型号名描述符、序列号描述符），验证 P27h-20 公开 EDID 样例（首次抓包后固化到 testdata）与缺字段样例的单测，缺字段输出"未知"
 
 ## 3. Windows DDC 后端（internal/ddc，build tag windows）
 
-- [ ] 3.1 用 purego 注册 user32 `EnumDisplayMonitors` 回调枚举 HMONITOR，验证单显示器/多显示器环境下列表数量正确
+- [ ] 3.1 用 `syscall.LazyProc` 注册 user32 `EnumDisplayMonitors` 回调枚举 HMONITOR（远程/虚拟显示按 3.8 过滤），验证本地控制台会话单显示器/多显示器环境下列表数量正确
 - [ ] 3.2 经 dxva2 `GetPhysicalMonitorsFromHMONITOR` 建立物理监视器会话并在 Close 时 `DestroyPhysicalMonitors`，验证句柄无泄漏（重复枚举 100 次成功）
 - [ ] 3.3 实现 `GetVCP`（`GetVCPFeatureAndVCPFeatureReply`，映射错误码到错误分类：不支持→UnsupportedCode、无应答→DDCDisabled/LinkUnsupported），验证 P27h-20 上读取 0x60/0x10 返回当前值与最大值
 - [ ] 3.4 实现 `SetVCP`（`SetVCPFeature`），验证写入 0x60 后显示器输入源实际切换
 - [ ] 3.5 实现 `Capabilities`（`CapabilitiesRequestAndCapabilitiesReply`，缓冲区分块读取），验证 P27h-20 返回串可被 2.5 解析器解析且包含 60/F3
 - [ ] 3.6 实现 EDID 注册表关联读取（`HKLM\...\DISPLAY\*\Device Parameters\EDID`），解析失败回退物理监视器描述串；验证 P27h-20 显示 Lenovo/P27h-20
 - [ ] 3.7 实现 `backend_other.go`（非 windows/darwin 返回 PlatformUnsupported），验证各平台 `go build` 标签编译通过
+- [x] 3.8 远程/虚拟显示检测：`GetSystemMetrics(SM_REMOTESESSION)` + 适配器 REMOTE 标志/`RdpIdd_IndirectDisplay` + 子设备 `MONITOR\Remote_Monitor`/`Default_Monitor` 过滤；无物理显示器时返回分类错误（远程→`remote_session`，本地→`link_unsupported`）；映射图形 HRESULT（0xC0262580–0xC0262585 → 链路/超时/不支持分类，详情带符号名）；已在 RDP 环境实测过滤与诊断成立，物理链路仍待 P27h-20 实测
 
 ## 4. Wails 应用绑定层
 

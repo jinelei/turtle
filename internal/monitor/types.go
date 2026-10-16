@@ -17,9 +17,9 @@ type Monitor struct {
 type VCPType uint8
 
 const (
-	VCPMomentary    VCPType = 0 // 瞬态（按钮式）
-	VCPFixedParams  VCPType = 1 // 连续/固定参数（带当前值与最大值）
-	VCPTypeUnknown  VCPType = 0xFF
+	VCPMomentary   VCPType = 0 // 瞬态（按钮式）
+	VCPFixedParams VCPType = 1 // 连续/固定参数（带当前值与最大值）
+	VCPTypeUnknown VCPType = 0xFF
 )
 
 // VCPValue 是一次 VCP Get 的结果。

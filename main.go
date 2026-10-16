@@ -49,7 +49,7 @@ func main() {
 }
 
 // newLogger 同时写 stdout（wails dev 可见）与用户目录下的日志文件
-//（GUI 双击运行时没有控制台，真机排错靠它）：%AppData%\turtle\app.log。
+// （GUI 双击运行时没有控制台，真机排错靠它）：%AppData%\turtle\app.log。
 func newLogger() *log.Logger {
 	writers := []io.Writer{os.Stdout}
 	if dir, err := os.UserConfigDir(); err == nil {

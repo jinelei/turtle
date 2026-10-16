@@ -29,15 +29,38 @@ body {
 }
 
 .layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  grid-template-rows: auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 12px;
   height: calc(100vh - 32px);
 }
 
+/* 三面板网格：左列显示器列表跨满两行（与右侧总高度平齐），
+   右上输入源（auto 高），右下显示器信息（填满剩余并内部滚动）。 */
+.content {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.panel-input {
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-info {
+  grid-column: 2;
+  grid-row: 2;
+}
+
 .banner {
-  grid-column: 1 / -1;
+  flex: none;
   padding: 10px 14px;
   border-radius: 8px;
   font-size: 13px;
@@ -75,6 +98,25 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--muted);
+}
+
+/* 左侧显示器列表：占据左列，纵向跨满网格两行，
+   始终与右侧"输入源 + 显示器信息"的总高度平齐。 */
+.sidebar {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.monitor-items {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* 最后一项自带 margin-bottom，底部抵消避免多一条缝 */
+  padding-right: 2px;
 }
 
 .monitor-item {

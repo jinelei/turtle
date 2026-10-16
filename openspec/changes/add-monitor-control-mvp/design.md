@@ -46,7 +46,9 @@ type Backend interface {
 - 对前端只暴露 DTO（`dto.MonitorInfo` 等），句柄留在后端 map 中管理，防止前端伪造。
 - 新增平台只需再实现一个 Backend；`!windows,!darwin` 提供返回"平台不支持"的 stub 保证可编译。
 
-### D3：Windows 后端——dxva2 高层监视器 API（purego）
+### D3：Windows 后端——dxva2 高层监视器 API（syscall）
+
+> 实现注记（2026-10-16）：原计划 purego，真机排错时改为标准库 `syscall.LazyProc.Call`——`Call` 在同一 OS 线程原子取回 LastError（purego 事后 `GetLastError` 会因 goroutine 线程漂移丢码，是真机报 `unknown` 的根因之一）；且不再引入第三方 FFI 依赖。
 
 调用链（均为系统 DLL，无需随包分发）：
 
@@ -57,7 +59,7 @@ type Backend interface {
 5. `dxva2.CapabilitiesRequestAndCapabilitiesReply` 取 0xF3；
 6. 结束时 `dxva2.DestroyPhysicalMonitors`。
 
-purego 注册 `user32.dll`/`dxva2.dll` 函数指针，结构体按 Windows 头文件布局定义（`PHYSICAL_MONITOR` = handle + 128×uint16 描述）。EDID 从注册表 `HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\*\Device Parameters\EDID` 按 GDI 设备名关联解析（厂商 ID、型号名、序列号），解析失败退回物理监视器描述串。purego 需要 amd64（Windows 11 arm64 本期不支持）。
+经 `syscall.NewLazyDLL`/`LazyProc.Call` 调用 `user32.dll`/`dxva2.dll`，结构体按 Windows 头文件布局定义（`PHYSICAL_MONITOR` = 指针宽 handle + 126×uint16 描述；`MC_VCP_CODE_TYPE` 输出参数是 4 字节 DWORD 枚举，误用 *uint8 会破坏栈内存）。EDID 从注册表 `HKLM\SYSTEM\CurrentControlSet\Enum\DISPLAY\*\Device Parameters\EDID` 按 GDI 设备名关联解析（厂商 ID、型号名、序列号），解析失败退回物理监视器描述串。枚举阶段必须过滤 RDP 间接显示/虚拟监视器（远程会话里物理显示器对 GDI 不可见，所有 VCP 调用返回 0xC0262582 `ERROR_GRAPHICS_I2C_ERROR_TRANSMITTING_DATA`）。syscall 路线纯 Go、需要 amd64（Windows 11 arm64 本期不支持）。
 
 ### D4：macOS 后端——IOKit / IOAVService（purego）
 

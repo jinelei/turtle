@@ -49,9 +49,9 @@ func (a *App) shutdown(_ context.Context) {
 // Reply 是所有绑定方法的统一信封：业务失败不抛 JS 异常，
 // 而是返回 ok=false 与结构化错误，便于前端做分类提示。
 type Reply struct {
-	OK    bool       `json:"ok"`
-	Error *APIError  `json:"error,omitempty"`
-	Data  any        `json:"data,omitempty"`
+	OK    bool      `json:"ok"`
+	Error *APIError `json:"error,omitempty"`
+	Data  any       `json:"data,omitempty"`
 }
 
 // APIError 携带错误分类、中文用户提示与技术详情。
@@ -408,6 +408,8 @@ func kindString(k monitor.Kind) string {
 		return "device_gone"
 	case monitor.KindPlatformUnsupported:
 		return "platform_unsupported"
+	case monitor.KindRemoteSession:
+		return "remote_session"
 	default:
 		return "unknown"
 	}

@@ -2,7 +2,7 @@ package monitor
 
 // VCP 特征码常量（VESA Monitor Control Command Set 常用子集）。
 const (
-	VCPInputSelect uint8 = 0x60
+	VCPInputSelect  uint8 = 0x60
 	VCPCapabilities uint8 = 0xF3
 	VCPBrightness   uint8 = 0x10
 	VCPContrast     uint8 = 0x12
@@ -87,7 +87,7 @@ var StandardInputNames = map[uint8]string{
 }
 
 // vendorInputNames 是标准表之外的厂商自定义输入值
-//（0x31 在 MCCS 中属保留区，Lenovo 用于 USB-C）。
+// （0x31 在 MCCS 中属保留区，Lenovo 用于 USB-C）。
 // 实测来源：Lenovo P27h-20，ControlMyMonitor 读出
 // 0x60 Possible Values = 15(0x0F DP), 17(0x11 HDMI), 49(0x31 USB-C)。
 var vendorInputNames = map[string]map[uint8]string{

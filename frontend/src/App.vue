@@ -48,34 +48,39 @@ onMounted(refresh)
       <details v-if="banner.detail"><summary>详情</summary>{{ banner.detail }}</details>
     </div>
 
-    <MonitorList
-      :monitors="monitors"
-      :selected-id="selectedId"
-      :loading="loading"
-      @select="selectedId = $event"
-      @refresh="refresh"
-    />
+    <!-- 三面板网格：左列侧栏跨满两行；右上输入源、右下显示器信息。
+         位置全部显式指定，避免数据加载后自动摆放导致布局跳动。 -->
+    <div class="content">
+      <MonitorList
+        class="sidebar"
+        :monitors="monitors"
+        :selected-id="selectedId"
+        :loading="loading"
+        @select="selectedId = $event"
+        @refresh="refresh"
+      />
 
-    <div class="panel" style="overflow: hidden; display: flex; flex-direction: column">
-      <template v-if="selected">
-        <InputPanel
-          :key="'in-' + selected.id"
+      <section class="panel panel-input">
+        <template v-if="selected">
+          <InputPanel
+            :key="'in-' + selected.id"
+            :monitor-id="selected.id"
+            @error="showError"
+          />
+        </template>
+        <div v-else class="empty">请先选择一台显示器</div>
+      </section>
+
+      <section class="panel panel-info">
+        <InfoPanel
+          v-if="selected"
+          :key="'info-' + selected.id"
+          :monitor="selected"
           :monitor-id="selected.id"
           @error="showError"
         />
-      </template>
-      <div v-else class="empty">请先选择一台显示器</div>
-    </div>
-
-    <div class="panel" style="grid-column: 2">
-      <InfoPanel
-        v-if="selected"
-        :key="'info-' + selected.id"
-        :monitor="selected"
-        :monitor-id="selected.id"
-        @error="showError"
-      />
-      <div v-else class="empty">选中显示器后，这里将显示型号、序列号与 VCP 状态</div>
+        <div v-else class="empty">选中显示器后，这里将显示型号、序列号与 VCP 状态</div>
+      </section>
     </div>
   </div>
 </template>

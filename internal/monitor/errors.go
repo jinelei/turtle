@@ -22,6 +22,8 @@ const (
 	KindDeviceGone
 	// KindPlatformUnsupported 当前平台后端尚未实现或环境不满足。
 	KindPlatformUnsupported
+	// KindRemoteSession 运行在远程桌面/虚拟显示会话中，物理显示器对会话不可见。
+	KindRemoteSession
 )
 
 // Error 携带分类与底层原因。
@@ -60,6 +62,8 @@ func (e *Error) UserMessage() string {
 		return "显示器已断开，请重新选择设备。"
 	case KindPlatformUnsupported:
 		return "当前平台尚不受支持或运行环境不满足要求。"
+	case KindRemoteSession:
+		return "当前运行在远程桌面会话中，无法访问物理显示器的 DDC/CI 通道，请在连接显示器的电脑上本地运行（不要通过远程桌面连接）。"
 	default:
 		return "显示器操作失败，请重试。"
 	}
@@ -79,6 +83,8 @@ func kindName(k Kind) string {
 		return "device gone"
 	case KindPlatformUnsupported:
 		return "platform unsupported"
+	case KindRemoteSession:
+		return "remote session"
 	default:
 		return "unknown"
 	}

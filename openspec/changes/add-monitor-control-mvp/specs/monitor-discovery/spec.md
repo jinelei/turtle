@@ -20,6 +20,20 @@
 - **WHEN** 主机未连接外接显示器（如 Mac 合盖仅用内建屏）
 - **THEN** 界面展示空状态与"未检测到支持 DDC/CI 的显示器"提示，且不发生崩溃
 
+### Requirement: 排除远程会话与虚拟显示器
+
+系统 SHALL 在枚举时识别并排除非本地物理显示输出，包括远程桌面（RDP）会话中的间接显示驱动设备（如 `RdpIdd_IndirectDisplay`、`MONITOR\Remote_Monitor`）与无 EDID 的默认占位监视器（`MONITOR\Default_Monitor`）。当排除后不存在任何物理显示器时，系统 MUST 返回明确的分类错误而非把虚拟设备列为"Generic PnP Monitor"：运行在远程会话中时返回 `remote_session` 分类，本地会话中返回 `link_unsupported` 分类，两者均带可执行的中文修复指引。
+
+#### Scenario: 应用在远程桌面会话中启动
+
+- **WHEN** 用户通过远程桌面（RDP）连接主机并启动应用，会话中仅有 Microsoft Remote Display Adapter 虚拟显示器
+- **THEN** 设备列表不展示虚拟显示器，界面提示"当前运行在远程桌面会话中，无法访问物理显示器的 DDC/CI 通道，请在连接显示器的电脑上本地运行"，且不向虚拟显示设备发送任何 VCP 指令
+
+#### Scenario: 物理显示器与虚拟显示器并存
+
+- **WHEN** 会话中同时存在一台物理显示器（经真实 GPU 输出）与远程间接显示设备
+- **THEN** 列表只包含物理显示器，虚拟设备被静默过滤，物理显示器的枚举与 DDC 操作正常进行
+
 ### Requirement: 读取显示器身份信息
 
 系统 SHALL 为每台显示器读取并展示身份信息，至少包括厂商名称、型号名称与序列号；身份信息 MUST 优先来自 EDID / 平台显示 API，无法取得的字段允许为空但必须以"未知"明确标注，不得展示为乱码或原始字节。
