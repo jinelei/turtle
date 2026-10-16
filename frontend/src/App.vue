@@ -43,11 +43,6 @@ onMounted(refresh)
 
 <template>
   <div class="layout">
-    <div v-if="banner" :class="['banner', banner.kind]">
-      <div>{{ banner.message }}</div>
-      <details v-if="banner.detail"><summary>详情</summary>{{ banner.detail }}</details>
-    </div>
-
     <!-- 三面板网格：左列侧栏跨满两行；右上输入源、右下显示器信息。
          位置全部显式指定，避免数据加载后自动摆放导致布局跳动。 -->
     <div class="content">
@@ -81,6 +76,13 @@ onMounted(refresh)
         />
         <div v-else class="empty">选中显示器后，这里将显示型号、序列号与 VCP 状态</div>
       </section>
+    </div>
+
+    <!-- 提示区固定在窗口底部：flex: none 不参与伸缩，
+         .content 占满剩余高度，提示出现/消失不会引起整体重排。 -->
+    <div v-if="banner" :class="['banner', banner.kind]">
+      <div>{{ banner.message }}</div>
+      <details v-if="banner.detail"><summary>详情</summary>{{ banner.detail }}</details>
     </div>
   </div>
 </template>
